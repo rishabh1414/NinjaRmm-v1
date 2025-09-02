@@ -274,13 +274,34 @@ app.get("/api/organizations", async (req, res) => {
   }
 });
 
-// Get one organization by ID
+// Get single organization by ID (filter from all orgs)
 app.get("/api/organizations/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // fetch all orgs
+    const data = await ninjaRequest("GET", "/v2/organizations");
+
+    // find the one with matching ID
+    const org = data.find((o) => String(o.id) === String(id));
+
+    if (!org) {
+      return res.status(404).json({ error: `Organization ${id} not found` });
+    }
+
+    res.json(org);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get single ticket by ID
+app.get("/api/tickets/:id", async (req, res) => {
   try {
     const { id } = req.params;
     const data = await ninjaRequest(
       "GET",
-      `/v2/organizations/${encodeURIComponent(id)}`
+      `/v2/ticketing/ticket/${encodeURIComponent(id)}`
     );
     res.json(data);
   } catch (e) {
