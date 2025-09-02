@@ -1,4 +1,4 @@
-NinjaRMM Node.js API Documentation
+# NinjaRMM Node.js API Documentation
 
 Base URL: https://ninjarmmv1.securebusinessautomation.com
 
