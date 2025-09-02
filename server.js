@@ -264,6 +264,30 @@ app.put("/api/tickets/:id", async (req, res) => {
   }
 });
 
+// Get all organizations
+app.get("/api/organizations", async (req, res) => {
+  try {
+    const data = await ninjaRequest("GET", "/v2/organizations");
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get one organization by ID
+app.get("/api/organizations/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await ninjaRequest(
+      "GET",
+      `/v2/organizations/${encodeURIComponent(id)}`
+    );
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---------- START ----------
 (async () => {
   await initMongo();
