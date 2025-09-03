@@ -308,7 +308,139 @@ app.get("/api/tickets/:id", async (req, res) => {
     res.status(500).json({ error: e.message });
   }
 });
+/**
+ * GET /api/tickets/:ticketId/logs
+ * Returns ticket log entries with selective fields and enriched user info:
+ * - Always include: appUserContactId, appUserContactType, type, body, htmlBody, fullEmailBody, publicEntry, system, createTime
+ * - If TECHNICIAN: technicianFirstName, technicianLastName, technicianEmail, technicianPhone, technicianUserType
+ * - Else (contact): clientFirstName, clientLastName, clientEmail, clientUserType, clientNaturalId
+ */
+app.get("/api/tickets/:ticketId/logs", async (req, res) => {
+  const { ticketId } = req.params;
+  try {
+    const accessToken = await getAccessToken(); // you already have this in your app
 
+    // 1) Fetch log entries
+    const logsResp = await fetch(
+      `https://${NINJA_HOST}/v2/ticketing/ticket/${encodeURIComponent(
+        ticketId
+      )}/log-entry?pageSize=500`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Accept: "application/json",
+        },
+      }
+    );
+    if (!logsResp.ok) {
+      const errText = await logsResp.text();
+      return res
+        .status(logsResp.status)
+        .json({ error: "ninja_logs_failed", message: errText });
+    }
+    /** @type {Array} */
+    const rawLogs = await logsResp.json();
+
+    // 2) Collect unique TECHNICIAN ids and CONTACT ids (or any non-tech type)
+    const techIds = new Set();
+    const contactIds = new Set();
+
+    for (const l of rawLogs) {
+      const t = (l.appUserContactType || "").toUpperCase();
+      const id = l.appUserContactId;
+      if (id == null) continue;
+      if (t === "TECHNICIAN") techIds.add(id);
+      else contactIds.add(id);
+    }
+
+    // 3) Fetch technicians (one-by-one; map by id)
+    const technicianMap = new Map();
+    await Promise.all(
+      [...techIds].map(async (tid) => {
+        const r = await fetch(
+          `https://${NINJA_HOST}/v2/user/technician/${encodeURIComponent(tid)}`,
+          {
+            headers: {
+              Authorization: `Bearer ${accessToken}`,
+              Accept: "application/json",
+            },
+          }
+        );
+        if (r.ok) {
+          const t = await r.json();
+          technicianMap.set(Number(tid), t);
+        }
+      })
+    );
+
+    // 4) Fetch contacts list once (build map)
+    const contactMap = new Map();
+    if (contactIds.size > 0) {
+      const contactsResp = await fetch(
+        `https://${NINJA_HOST}/v2/ticketing/contact/contacts?pageSize=1000`,
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Accept: "application/json",
+          },
+        }
+      );
+      if (contactsResp.ok) {
+        const contacts = await contactsResp.json();
+        for (const c of contacts) {
+          contactMap.set(Number(c.id), c);
+        }
+      }
+    }
+
+    // 5) Build response
+    const result = rawLogs.map((l) => {
+      const base = {
+        appUserContactId: l.appUserContactId ?? null,
+        appUserContactType: l.appUserContactType ?? null,
+        type: l.type ?? null,
+        body: l.body ?? null,
+        htmlBody: l.htmlBody ?? null,
+        fullEmailBody: l.fullEmailBody ?? null,
+        publicEntry: l.publicEntry ?? null,
+        system: l.system ?? null,
+        createTime: l.createTime ?? null,
+      };
+
+      const t = (l.appUserContactType || "").toUpperCase();
+      const id = l.appUserContactId;
+
+      if (t === "TECHNICIAN" && id != null) {
+        const tech = technicianMap.get(Number(id));
+        if (tech) {
+          base.technicianFirstName = tech.firstName ?? null;
+          base.technicianLastName = tech.lastName ?? null;
+          base.technicianEmail = tech.email ?? null;
+          base.technicianPhone = tech.phone ?? null;
+          base.technicianUserType = tech.userType ?? "TECHNICIAN";
+        }
+      } else if (id != null) {
+        const c = contactMap.get(Number(id));
+        if (c) {
+          base.clientFirstName = c.firstName ?? null;
+          base.clientLastName = c.lastName ?? null;
+          base.clientEmail = c.email ?? null;
+          base.clientUserType = "CONTACT";
+          base.clientNaturalId = c.uid ?? null; // your request: "client natural ID"
+        }
+      }
+
+      return base;
+    });
+
+    return res.json(result);
+  } catch (e) {
+    console.error("logs handler error", e);
+    return res
+      .status(500)
+      .json({ error: "internal", message: String(e?.message || e) });
+  }
+});
 // ---------- START ----------
 (async () => {
   await initMongo();
